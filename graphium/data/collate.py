@@ -216,7 +216,7 @@ def get_expected_label_size(label_data: Data, task: str, label_size: List[int]):
     """Determines expected label size based on the specfic graph properties
     and the number of targets in the task-dataset.
     """
-    if task.startswith("graph_"):
+    if task.startswith("GO"):
         num_labels = 1
     elif task.startswith("node_"):
         num_labels = label_data.x.size(0)
