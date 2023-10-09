@@ -60,7 +60,7 @@ class PreprocessPositions(nn.Module):
         self.node_proj = nn.Linear(self.num_kernel, self.embed_dim)
 
     # Batching Function
-    def compute_delta_pos_in_batches(pos, batch_size):
+    def compute_delta_pos_in_batches(self, pos, batch_size):
         batch, n_node, _ = pos.shape
         delta_pos = torch.zeros((batch, n_node, n_node, 3), device=pos.device, dtype=pos.dtype)
     
@@ -91,7 +91,7 @@ class PreprocessPositions(nn.Module):
         padding_mask = ~mask
         batch, n_node, _ = pos.shape
         batch_size = 1024  # Or any other batch size that fits in your memory
-        delta_pos = compute_delta_pos_in_batches(pos, batch_size) # Implement Batching function
+        delta_pos = self.compute_delta_pos_in_batches(pos, batch_size) # Implement Batching function
         distance = delta_pos.norm(dim=-1).view(-1, n_node, n_node)
         distance_feature = self.gaussian(distance)
         attn_bias = self.gaussian_proj(distance_feature)
