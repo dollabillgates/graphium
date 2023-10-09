@@ -13,7 +13,7 @@ from graphium.ipu.to_dense_batch import to_dense_batch, to_sparse_batch
 
 class PreprocessPositions(nn.Module):
     """
-    Compute 3D attention bias and 3D node features according to the 3D position information.
+    Compute 3D attention bias and 3D node features according to the 3D position information. 
     """
 
     def __init__(
