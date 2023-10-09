@@ -117,7 +117,7 @@ class GaussianLayer(nn.Module):
         nn.init.uniform_(self.means.weight, 0, in_dim)
         nn.init.uniform_(self.stds.weight, 0, in_dim)
 
-   def forward(self, input: Tensor, batch_size=1024, file_path="tensor_with_kernel.h5") -> Tensor:
+    def forward(self, input: Tensor, batch_size=1024, file_path="tensor_with_kernel.h5") -> Tensor:
         input = input.unsqueeze(-1)
         mean = self.means.weight.float().view(-1)
         std = self.stds.weight.float().view(-1).abs() + 0.01 
