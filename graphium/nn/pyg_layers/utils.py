@@ -146,6 +146,7 @@ class GaussianLayer(nn.Module):
         with h5py.File(file_path, 'r') as f:
             tensor_with_kernel_dset = f['tensor_with_kernel']
             tensor_with_kernel = torch.from_numpy(tensor_with_kernel_dset[:])  # Convert this as per your memory handling strategy
+            tensor_with_kernel = tensor_with_kernel.to(batch_kernel.device) # Move tensor_with_kernel back to device
     
         os.remove(file_path)  # Clean up the temporary file to save disk space
     
