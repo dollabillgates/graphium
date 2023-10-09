@@ -108,7 +108,6 @@ class PreprocessPositions(nn.Module):
         return attn_bias, node_feature
 
 class GaussianLayer(nn.Module):
-    class GaussianLayer_batch(nn.Module):
     def __init__(self, num_kernels=128, in_dim=3):
         super().__init__()
         self.num_kernels = num_kernels
