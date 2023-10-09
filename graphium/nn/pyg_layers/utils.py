@@ -1,4 +1,5 @@
 import math
+import h5py
 import torch
 import torch.nn as nn
 from torch_geometric.data import Batch
@@ -116,21 +117,33 @@ class GaussianLayer(nn.Module):
         nn.init.uniform_(self.means.weight, 0, in_dim)
         nn.init.uniform_(self.stds.weight, 0, in_dim)
 
-    def forward(self, input: Tensor, batch_size=1024) -> Tensor:
+   def forward(self, input: Tensor, batch_size=1024, file_path="tensor_with_kernel.h5") -> Tensor:
         input = input.unsqueeze(-1)
-        expanded_input = input.expand(-1, -1, -1, self.num_kernels)
         mean = self.means.weight.float().view(-1)
         std = self.stds.weight.float().view(-1).abs() + 0.01 
         pre_exp_factor = (2 * math.pi) ** 0.5
-
-        tensor_with_kernel = torch.zeros_like(expanded_input)
-
-        for i in range(0, input.shape[1], batch_size):
-            for j in range(0, input.shape[2], batch_size):
-                batch_input = expanded_input[:, i:i+batch_size, j:j+batch_size, :]
-                batch_kernel = torch.exp(-0.5 * (((batch_input - mean) / std) ** 2)) / (pre_exp_factor * std)
-                tensor_with_kernel[:, i:i+batch_size, j:j+batch_size, :] = batch_kernel
-
+    
+        with h5py.File(file_path, 'w') as f:
+            tensor_with_kernel_dset = f.create_dataset('tensor_with_kernel', 
+                                                       shape=(input.shape[0], input.shape[1], input.shape[2], self.num_kernels),
+                                                       dtype='f')
+    
+            for i in range(0, input.shape[1], batch_size):
+                for j in range(0, input.shape[2], batch_size):
+                    slice_i = slice(i, i + batch_size)
+                    slice_j = slice(j, j + batch_size)
+                    batch_input = input[:, slice_i, slice_j, :].expand(-1, -1, -1, self.num_kernels)
+                    
+                    batch_kernel = torch.exp(-0.5 * (((batch_input - mean) / std) ** 2)) / (pre_exp_factor * std)
+                    tensor_with_kernel_dset[:, slice_i, slice_j, :] = batch_kernel.cpu().numpy()
+    
+        # Load data from HDF5 in chunks and reconstruct tensor_with_kernel
+        with h5py.File(file_path, 'r') as f:
+            tensor_with_kernel_dset = f['tensor_with_kernel']
+            tensor_with_kernel = torch.from_numpy(tensor_with_kernel_dset[:])  # Convert this as per your memory handling strategy
+    
+        os.remove(file_path)  # Clean up the temporary file to save disk space
+    
         return tensor_with_kernel
 
 def triplets(
