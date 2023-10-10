@@ -97,7 +97,7 @@ class PreprocessPositions(nn.Module):
             attn_bias = self.gaussian_proj(distance_feature)
             attn_bias = attn_bias.permute(0, 3, 1, 2).contiguous()
         
-            expanded_nan_mask = nan_mask.unsqueeze(1).unsqueeze(-1).unsqueeze(-1).expand(
+            expanded_nan_mask = nan_mask.unsqueeze(0).unsqueeze(1).unsqueeze(-1).expand(
             attn_bias.size(0), attn_bias.size(1), attn_bias.size(2), attn_bias.size(3))
 
             distance_feature.masked_fill_(nan_mask.unsqueeze(1).unsqueeze(-1), 0.0)
