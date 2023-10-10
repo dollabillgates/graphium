@@ -89,16 +89,15 @@ class PreprocessPositions(nn.Module):
             graph_pos = pos[batch.batch == graph]
             nan_mask = torch.isnan(graph_pos)[:, 0]
             graph_pos.masked_fill_(nan_mask.unsqueeze(1), 0.0)
-    
+        
             delta_pos = graph_pos.unsqueeze(1) - graph_pos.unsqueeze(0)
             distance = delta_pos.norm(dim=-1).view(1, delta_pos.shape[0], delta_pos.shape[1])
             distance_feature = self.gaussian(distance)
             
             attn_bias = self.gaussian_proj(distance_feature)
             attn_bias = attn_bias.permute(0, 3, 1, 2).contiguous()
-            # attn_bias.masked_fill_(nan_mask.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1), 0.0)
-            # Updated masking operation with correction for multiple graphs
-            expanded_nan_mask = nan_mask.unsqueeze(1).unsqueeze(-1).unsqueeze(-1).expand(-1, attn_bias.size(1), attn_bias.size(2), attn_bias.size(3))
+        
+            expanded_nan_mask = nan_mask.unsqueeze(1).unsqueeze(2).unsqueeze(3)
             attn_bias.masked_fill_(expanded_nan_mask, 0.0)
     
             distance_feature.masked_fill_(nan_mask.unsqueeze(1).unsqueeze(-1), 0.0)
