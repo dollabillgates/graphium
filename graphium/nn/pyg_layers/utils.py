@@ -41,7 +41,7 @@ class PreprocessPositions(nn.Module):
         if self.first_normalization is not None:
             pos = self.first_normalization(pos)
 
-        batch_size = 100 #1024
+        batch_size = 100  # 1024
         attn_bias_list = []
         node_feature_list = []
 
@@ -52,13 +52,14 @@ class PreprocessPositions(nn.Module):
             drop_nodes_last_graph=on_ipu,
         )
 
-        nan_mask = torch.isnan(pos)[:, 0, 0]
-        pos.masked_fill_(nan_mask.unsqueeze(1).unsqueeze(2), 0.0)
+        if torch.isnan(pos).any():
+            pos.masked_fill_(torch.isnan(pos)[:, 0, 0].unsqueeze(1).unsqueeze(2), 0.0)
+
         padding_mask = ~mask
 
         for graph in range(batch.num_graphs):
             graph_pos = pos[graph]
-            nan_mask_graph = nan_mask[graph]
+            nan_mask_graph = torch.isnan(graph_pos)[:, 0]
 
             distance_features_sum = torch.zeros((graph_pos.shape[0], self.num_kernel), device=pos.device, dtype=pos.dtype)
             attn_bias = torch.zeros((self.num_heads, graph_pos.shape[0], graph_pos.shape[0]), device=pos.device, dtype=pos.dtype)
@@ -73,18 +74,22 @@ class PreprocessPositions(nn.Module):
                 del distance_features            
 
             attn_bias.masked_fill_(padding_mask[graph].unsqueeze(0), float("-1000"))
-            attn_bias.masked_fill_(nan_mask_graph.unsqueeze(-1).unsqueeze(-1), 0.0)
-
-            distance_features_sum = distance_features_sum.to(self.node_proj.weight.dtype)
-            node_feature = self.node_proj(distance_features_sum)
-            node_feature.masked_fill_(nan_mask_graph.unsqueeze(1), 0.0)
+            if nan_mask_graph.any():
+                attn_bias.masked_fill_(nan_mask_graph.unsqueeze(-1).unsqueeze(-1), 0.0)
+                node_feature.masked_fill_(nan_mask_graph.unsqueeze(1), 0.0)
 
             attn_bias_list.append(attn_bias)
             node_feature_list.append(node_feature)
 
+            # Explicitly deleting tensors to free up memory (optional depending on your memory usage)
+            del attn_bias, node_feature, nan_mask_graph, distance_features_sum
+
         attn_bias = torch.cat(attn_bias_list, dim=0)
         node_feature = torch.cat(node_feature_list, dim=0)
         node_feature = to_sparse_batch(node_feature, idx)
+
+        # Clearing the list to release memory
+        del attn_bias_list, node_feature_list 
 
         return attn_bias, node_feature
 
