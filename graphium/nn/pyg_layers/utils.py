@@ -4,43 +4,13 @@ import h5py
 import torch
 import torch.nn as nn
 from torch_geometric.data import Batch
-from typing import Tuple
-from torch import Tensor
-
 from torch_geometric.typing import SparseTensor
 
 from graphium.nn.base_layers import MLP, get_norm
 from graphium.ipu.to_dense_batch import to_dense_batch, to_sparse_batch
 
-
 class PreprocessPositions(nn.Module):
-    """
-    Compute 3D attention bias and 3D node features according to the 3D position information. 
-    """
-
-    def __init__(
-        self,
-        num_heads,
-        embed_dim,
-        num_kernel,
-        in_dim=3,
-        num_layers=2,
-        activation="gelu",
-        first_normalization="none",
-    ):
-        r"""
-        Parameters:
-            num_heads:
-                Number of attention heads used in self-attention.
-            embed_dim:
-                Hidden dimension of node features.
-            num_kernel:
-                Number of gaussian kernels.
-            num_layers: The number of layers in the MLP.
-            activation: The activation function used in the MLP.
-            first_normalization: The normalization function used before the gaussian kernel.
-
-        """
+    def __init__(self, num_heads, embed_dim, num_kernel, in_dim=3, num_layers=2, activation="gelu", first_normalization="none"):
         super().__init__()
         self.num_heads = num_heads
         self.num_kernel = num_kernel
@@ -54,65 +24,80 @@ class PreprocessPositions(nn.Module):
             out_dim=self.num_heads,
             depth=num_layers,
             activation=activation,
-            last_layer_is_readout=True,  # Since the output is not proportional to the hidden dim, but to the number of heads
+            last_layer_is_readout=True,
         )
-
-        # make sure the 3D node feature has the same dimension as the embedding size
-        # so that it can be added to the original node features
         self.node_proj = nn.Linear(self.num_kernel, self.embed_dim)
 
-    # Batching Function
     def compute_delta_pos_in_batches(self, pos, batch_size):
         batch, n_node, _ = pos.shape
         delta_pos = torch.zeros((batch, n_node, n_node, 3), device=pos.device, dtype=pos.dtype)
-    
+
         for i in range(0, n_node, batch_size):
             for j in range(0, n_node, batch_size):
                 slice_i = slice(i, i+batch_size)
                 slice_j = slice(j, j+batch_size)
                 delta_pos[:, slice_i, slice_j] = pos[:, slice_i, :].unsqueeze(2) - pos[:, slice_j, :].unsqueeze(1)
-    
+
         return delta_pos
-    
-    def forward(
-    self, batch: Batch, max_num_nodes_per_graph: int, on_ipu: bool, positions_3d_key: str
-) -> Tuple[Tensor, Tensor]:
+
+    def forward(self, batch: Batch, max_num_nodes_per_graph: int, on_ipu: bool, positions_3d_key: str) -> Tuple[Tensor, Tensor]:
         pos = batch[positions_3d_key]
         if self.first_normalization is not None:
             pos = self.first_normalization(pos)
-    
-        batch_size = 1024  # Or any other batch size that fits in your memory
+
+        batch_size = 100 #1024
         attn_bias_list = []
         node_feature_list = []
-    
+
+        pos, mask, idx = to_dense_batch(
+            pos,
+            batch=batch.batch,
+            batch_size=batch_size,
+            max_num_nodes_per_graph=max_num_nodes_per_graph,
+            drop_nodes_last_graph=on_ipu,
+        )
+
+        nan_mask = torch.isnan(pos)[:, 0, 0]
+        pos.masked_fill_(nan_mask.unsqueeze(1).unsqueeze(2), 0.0)
+        padding_mask = ~mask
+
         for graph in range(batch.num_graphs):
-            graph_pos = pos[batch.batch == graph]
-            nan_mask = torch.isnan(graph_pos)[:, 0]
-            graph_pos.masked_fill_(nan_mask.unsqueeze(1), 0.0)
-        
-            delta_pos = graph_pos.unsqueeze(1) - graph_pos.unsqueeze(0)
-            distance = delta_pos.norm(dim=-1).view(1, delta_pos.shape[0], delta_pos.shape[1])
+            graph_pos = pos[graph]
+            nan_mask_graph = nan_mask[graph]
+
+            delta_pos = self.compute_delta_pos_in_batches(graph_pos.unsqueeze(0), batch_size)
+            distance = delta_pos.norm(dim=-1)
+
             distance_feature = self.gaussian(distance)
-            
+
             attn_bias = self.gaussian_proj(distance_feature)
             attn_bias = attn_bias.permute(0, 3, 1, 2).contiguous()
-        
-            expanded_nan_mask = nan_mask.unsqueeze(0).unsqueeze(1).unsqueeze(-1).expand(
-            attn_bias.size(0), attn_bias.size(1), attn_bias.size(2), attn_bias.size(3))
 
-            distance_feature.masked_fill_(nan_mask.unsqueeze(1).unsqueeze(-1), 0.0)
+            attn_bias.masked_fill_(
+                padding_mask[graph].unsqueeze(1).unsqueeze(2),
+                float("-1000"),
+            )
+            attn_bias.masked_fill_(
+                nan_mask_graph.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1),
+                0.0,
+            )
+
+            distance_feature.masked_fill_(nan_mask_graph.unsqueeze(1).unsqueeze(-1), 0.0)
             distance_feature_sum = distance_feature.sum(dim=-2)
             distance_feature_sum = distance_feature_sum.to(self.node_proj.weight.dtype)
-    
+
             node_feature = self.node_proj(distance_feature_sum)
-            node_feature.masked_fill_(nan_mask.unsqueeze(1), 0.0)
-    
+            node_feature.masked_fill_(nan_mask_graph.unsqueeze(1), 0.0)
+
             attn_bias_list.append(attn_bias)
             node_feature_list.append(node_feature)
-    
+
         attn_bias = torch.cat(attn_bias_list, dim=0)
         node_feature = torch.cat(node_feature_list, dim=0)
-        
+
+        # Convert the node features to sparse batch
+        node_feature = to_sparse_batch(node_feature, idx)
+
         return attn_bias, node_feature
 
 class GaussianLayer(nn.Module):
