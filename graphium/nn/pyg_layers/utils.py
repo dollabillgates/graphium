@@ -64,7 +64,7 @@ class PreprocessPositions(nn.Module):
             distance_features_sum = torch.zeros((graph_pos.shape[0], self.num_kernel), device=pos.device, dtype=pos.dtype)
             attn_bias = torch.zeros((self.num_heads, graph_pos.shape[0], graph_pos.shape[0]), device=pos.device, dtype=pos.dtype)
 
-            for delta_pos_batch in self.compute_delta_pos_in_batches(graph_pos.unsqueeze(0), batch_size):
+            for delta_pos_batch in self.compute_delta_pos_in_batches(graph_pos, batch_size):
                 distance = delta_pos_batch.norm(dim=-1)
                 distance_features = self.gaussian(distance)
 
@@ -74,6 +74,7 @@ class PreprocessPositions(nn.Module):
                 del distance_features            
 
             attn_bias.masked_fill_(padding_mask[graph].unsqueeze(0), float("-1000"))
+            node_feature = self.node_proj(distance_features_sum)
             if nan_mask_graph.any():
                 attn_bias.masked_fill_(nan_mask_graph.unsqueeze(-1).unsqueeze(-1), 0.0)
                 node_feature.masked_fill_(nan_mask_graph.unsqueeze(1), 0.0)
