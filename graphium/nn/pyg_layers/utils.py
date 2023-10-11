@@ -70,6 +70,7 @@ class PreprocessPositions(nn.Module):
                 distance_features_sum += distance_features.sum(dim=-2)
                 attn_bias_per_head = self.gaussian_proj(distance_features).permute(0, 3, 1, 2).contiguous()
                 attn_bias += attn_bias_per_head.squeeze(0)
+                del distance_features            
 
             attn_bias.masked_fill_(padding_mask[graph].unsqueeze(0), float("-1000"))
             attn_bias.masked_fill_(nan_mask_graph.unsqueeze(-1).unsqueeze(-1), 0.0)
