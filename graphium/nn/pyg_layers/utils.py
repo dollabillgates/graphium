@@ -3,6 +3,8 @@ import math
 import h5py
 import torch
 import torch.nn as nn
+from typing import Tuple
+from torch import Tensor
 from torch_geometric.data import Batch
 from torch_geometric.typing import SparseTensor
 
