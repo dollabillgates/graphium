@@ -31,16 +31,10 @@ class PreprocessPositions(nn.Module):
         self.node_proj = nn.Linear(self.num_kernel, self.embed_dim)
 
     def compute_delta_pos_in_batches(self, pos, batch_size):
-        batch, n_node, _ = pos.shape
-        delta_pos = torch.zeros((batch, n_node, n_node, 3), device=pos.device, dtype=pos.dtype)
-
+        n_node, _ = pos.shape
         for i in range(0, n_node, batch_size):
-            for j in range(0, n_node, batch_size):
-                slice_i = slice(i, i+batch_size)
-                slice_j = slice(j, j+batch_size)
-                delta_pos[:, slice_i, slice_j] = pos[:, slice_i, :].unsqueeze(2) - pos[:, slice_j, :].unsqueeze(1)
-
-        return delta_pos
+            slice_i = slice(i, min(i + batch_size, n_node))
+            yield pos[slice_i, :].unsqueeze(1) - pos
 
     def forward(self, batch: Batch, max_num_nodes_per_graph: int, on_ipu: bool, positions_3d_key: str) -> Tuple[Tensor, Tensor]:
         pos = batch[positions_3d_key]
@@ -54,7 +48,6 @@ class PreprocessPositions(nn.Module):
         pos, mask, idx = to_dense_batch(
             pos,
             batch=batch.batch,
-            batch_size=batch_size,
             max_num_nodes_per_graph=max_num_nodes_per_graph,
             drop_nodes_last_graph=on_ipu,
         )
@@ -67,28 +60,22 @@ class PreprocessPositions(nn.Module):
             graph_pos = pos[graph]
             nan_mask_graph = nan_mask[graph]
 
-            delta_pos = self.compute_delta_pos_in_batches(graph_pos.unsqueeze(0), batch_size)
-            distance = delta_pos.norm(dim=-1)
+            distance_features_sum = torch.zeros((graph_pos.shape[0], self.num_kernel), device=pos.device, dtype=pos.dtype)
+            attn_bias = torch.zeros((self.num_heads, graph_pos.shape[0], graph_pos.shape[0]), device=pos.device, dtype=pos.dtype)
 
-            distance_feature = self.gaussian(distance)
+            for delta_pos_batch in self.compute_delta_pos_in_batches(graph_pos.unsqueeze(0), batch_size):
+                distance = delta_pos_batch.norm(dim=-1)
+                distance_features = self.gaussian(distance)
 
-            attn_bias = self.gaussian_proj(distance_feature)
-            attn_bias = attn_bias.permute(0, 3, 1, 2).contiguous()
+                distance_features_sum += distance_features.sum(dim=-2)
+                attn_bias_per_head = self.gaussian_proj(distance_features).permute(0, 3, 1, 2).contiguous()
+                attn_bias += attn_bias_per_head.squeeze(0)
 
-            attn_bias.masked_fill_(
-                padding_mask[graph].unsqueeze(1).unsqueeze(2),
-                float("-1000"),
-            )
-            attn_bias.masked_fill_(
-                nan_mask_graph.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1),
-                0.0,
-            )
+            attn_bias.masked_fill_(padding_mask[graph].unsqueeze(0), float("-1000"))
+            attn_bias.masked_fill_(nan_mask_graph.unsqueeze(-1).unsqueeze(-1), 0.0)
 
-            distance_feature.masked_fill_(nan_mask_graph.unsqueeze(1).unsqueeze(-1), 0.0)
-            distance_feature_sum = distance_feature.sum(dim=-2)
-            distance_feature_sum = distance_feature_sum.to(self.node_proj.weight.dtype)
-
-            node_feature = self.node_proj(distance_feature_sum)
+            distance_features_sum = distance_features_sum.to(self.node_proj.weight.dtype)
+            node_feature = self.node_proj(distance_features_sum)
             node_feature.masked_fill_(nan_mask_graph.unsqueeze(1), 0.0)
 
             attn_bias_list.append(attn_bias)
@@ -96,8 +83,6 @@ class PreprocessPositions(nn.Module):
 
         attn_bias = torch.cat(attn_bias_list, dim=0)
         node_feature = torch.cat(node_feature_list, dim=0)
-
-        # Convert the node features to sparse batch
         node_feature = to_sparse_batch(node_feature, idx)
 
         return attn_bias, node_feature
@@ -111,35 +96,15 @@ class GaussianLayer(nn.Module):
         nn.init.uniform_(self.means.weight, 0, in_dim)
         nn.init.uniform_(self.stds.weight, 0, in_dim)
 
-    def forward(self, input: Tensor, batch_size=100, file_path="tensor_with_kernel.h5") -> Tensor: # batch_size=1024
-        input = input.unsqueeze(-1)
+    def forward(self, distance: Tensor) -> Tensor:
+        distance = distance.unsqueeze(-1)
         mean = self.means.weight.float().view(-1)
-        std = self.stds.weight.float().view(-1).abs() + 0.01 
+        std = self.stds.weight.float().view(-1).abs() + 0.01
+
         pre_exp_factor = (2 * math.pi) ** 0.5
-    
-        with h5py.File(file_path, 'w') as f:
-            tensor_with_kernel_dset = f.create_dataset('tensor_with_kernel', 
-                                                       shape=(input.shape[0], input.shape[1], input.shape[2], self.num_kernels),
-                                                       dtype='f')
-    
-            for i in range(0, input.shape[1], batch_size):
-                for j in range(0, input.shape[2], batch_size):
-                    slice_i = slice(i, i + batch_size)
-                    slice_j = slice(j, j + batch_size)
-                    batch_input = input[:, slice_i, slice_j, :].expand(-1, -1, -1, self.num_kernels)
-                    
-                    batch_kernel = torch.exp(-0.5 * (((batch_input - mean) / std) ** 2)) / (pre_exp_factor * std)
-                    tensor_with_kernel_dset[:, slice_i, slice_j, :] = batch_kernel.cpu().numpy()
-    
-        # Load data from HDF5 in chunks and reconstruct tensor_with_kernel
-        with h5py.File(file_path, 'r') as f:
-            tensor_with_kernel_dset = f['tensor_with_kernel']
-            tensor_with_kernel = torch.from_numpy(tensor_with_kernel_dset[:])  # Convert this as per your memory handling strategy
-            tensor_with_kernel = tensor_with_kernel.to(batch_kernel.device) # Move tensor_with_kernel back to device
-    
-        os.remove(file_path)  # Clean up the temporary file to save disk space
-    
-        return tensor_with_kernel
+        gaussian_kernel = torch.exp(-0.5 * (((distance - mean) / std) ** 2)) / (pre_exp_factor * std)
+
+        return gaussian_kernel
 
 def triplets(
     edge_index: Tensor,
