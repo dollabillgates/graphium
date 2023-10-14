@@ -30,12 +30,6 @@ class PreprocessPositions(nn.Module):
         )
         self.node_proj = nn.Linear(self.num_kernel, self.embed_dim)
 
-    def compute_delta_pos_in_batches(self, pos, batch_size):
-        n_node, _ = pos.shape
-        for i in range(0, n_node, batch_size):
-            slice_i = slice(i, min(i + batch_size, n_node))
-            yield pos[slice_i, :].unsqueeze(1) - pos
-
     def forward(self, batch: Batch, max_num_nodes_per_graph: int, on_ipu: bool, positions_3d_key: str) -> Tuple[Tensor, Tensor]:
         pos = batch[positions_3d_key]
         if self.first_normalization is not None:
@@ -61,17 +55,21 @@ class PreprocessPositions(nn.Module):
             graph_pos = pos[graph]
             nan_mask_graph = torch.isnan(graph_pos)[:, 0]
 
-            distance_features_sum = torch.zeros((graph_pos.shape[0], self.num_kernel), device=pos.device, dtype=pos.dtype)
-            attn_bias = torch.zeros((self.num_heads, graph_pos.shape[0], graph_pos.shape[0]), device=pos.device, dtype=pos.dtype)
+            n_node = graph_pos.shape[0]
+            distance_features_sum = torch.zeros((n_node, self.num_kernel), device=pos.device, dtype=pos.dtype)
+            attn_bias = torch.zeros((self.num_heads, n_node, n_node), device=pos.device, dtype=pos.dtype)
 
-            for delta_pos_batch in self.compute_delta_pos_in_batches(graph_pos, batch_size):
+            for i in range(0, n_node, batch_size):
+                slice_i = slice(i, min(i + batch_size, n_node))
+                delta_pos_batch = graph_pos[slice_i].unsqueeze(1) - graph_pos
                 distance = delta_pos_batch.norm(dim=-1)
                 distance_features = self.gaussian(distance)
 
-                distance_features_sum += distance_features.sum(dim=-2)
+                distance_features_sum[slice_i] += distance_features.sum(dim=-2)
                 attn_bias_per_head = self.gaussian_proj(distance_features).permute(0, 3, 1, 2).contiguous()
                 attn_bias += attn_bias_per_head.squeeze(0)
-                del distance_features            
+
+                del distance_features, delta_pos_batch, distance            
 
             attn_bias.masked_fill_(padding_mask[graph].unsqueeze(0), float("-1000"))
             node_feature = self.node_proj(distance_features_sum)
@@ -82,14 +80,12 @@ class PreprocessPositions(nn.Module):
             attn_bias_list.append(attn_bias)
             node_feature_list.append(node_feature)
 
-            # Explicitly deleting tensors to free up memory (optional depending on your memory usage)
             del attn_bias, node_feature, nan_mask_graph, distance_features_sum
 
         attn_bias = torch.cat(attn_bias_list, dim=0)
         node_feature = torch.cat(node_feature_list, dim=0)
         node_feature = to_sparse_batch(node_feature, idx)
 
-        # Clearing the list to release memory
         del attn_bias_list, node_feature_list 
 
         return attn_bias, node_feature
