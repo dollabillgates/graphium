@@ -64,11 +64,10 @@ class PreprocessPositions(nn.Module):
                 delta_pos_batch = graph_pos[slice_i].unsqueeze(1) - graph_pos
                 distance = delta_pos_batch.norm(dim=-1)
                 distance_features = self.gaussian(distance)
-                distance_features = distance_features.unsqueeze(0)
 
                 distance_features_sum[slice_i] += distance_features.sum(dim=-2)
-                attn_bias_per_head = self.gaussian_proj(distance_features).permute(0, 3, 1, 2).contiguous()
-                attn_bias += attn_bias_per_head.squeeze(0)
+                attn_bias_per_head = self.gaussian_proj(distance_features).permute(2, 0, 1)
+                attn_bias += attn_bias_per_head
 
                 del distance_features, delta_pos_batch, distance            
 
