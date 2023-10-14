@@ -35,7 +35,7 @@ class PreprocessPositions(nn.Module):
         if self.first_normalization is not None:
             pos = self.first_normalization(pos)
 
-        batch_size = 100  # 1024
+        batch_size = 1  # 1024
         attn_bias_list = []
         node_feature_list = []
 
