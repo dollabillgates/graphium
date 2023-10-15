@@ -36,7 +36,7 @@ class PreprocessPositions(nn.Module):
             pos = self.first_normalization(pos)
 
         batch_size = 1  # 1024
-        block_size = 512 # attention bias
+        block_size = 128 # attention bias
         attn_bias_list = []
         node_feature_list = []
 
