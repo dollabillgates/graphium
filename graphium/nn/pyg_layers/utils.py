@@ -36,6 +36,7 @@ class PreprocessPositions(nn.Module):
             pos = self.first_normalization(pos)
 
         batch_size = 1  # 1024
+        block_size = 512 # attention bias
         attn_bias_list = []
         node_feature_list = []
 
@@ -57,7 +58,7 @@ class PreprocessPositions(nn.Module):
 
             n_node = graph_pos.shape[0]
             distance_features_sum = torch.zeros((n_node, self.num_kernel), device=pos.device, dtype=pos.dtype)
-            attn_bias = torch.zeros((self.num_heads, n_node, n_node), device=pos.device, dtype=pos.dtype)
+            attn_bias_blocks = []
 
             for i in range(0, n_node, batch_size):
                 slice_i = slice(i, min(i + batch_size, n_node))
@@ -68,10 +69,11 @@ class PreprocessPositions(nn.Module):
                 distance_features_sum[slice_i] += distance_features.sum(dim=-2)
                 attn_bias_per_head = self.gaussian_proj(distance_features).permute(2, 0, 1)
             
-                attn_bias[:, slice_i, :n_node] = attn_bias_per_head
+                attn_bias_blocks.append(attn_bias_per_head)
             
                 del distance_features, delta_pos_batch, distance 
 
+            attn_bias = torch.cat(attn_bias_blocks, dim=2)
             attn_bias.masked_fill_(padding_mask[graph].unsqueeze(0), float("-1000"))
             node_feature = self.node_proj(distance_features_sum)
             if nan_mask_graph.any():
@@ -81,7 +83,7 @@ class PreprocessPositions(nn.Module):
             attn_bias_list.append(attn_bias)
             node_feature_list.append(node_feature)
 
-            del attn_bias, node_feature, nan_mask_graph, distance_features_sum
+            del attn_bias, node_feature, nan_mask_graph, distance_features_sum, attn_bias_blocks
 
         attn_bias = torch.cat(attn_bias_list, dim=0)
         node_feature = torch.cat(node_feature_list, dim=0)
