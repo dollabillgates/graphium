@@ -73,7 +73,7 @@ class PreprocessPositions(nn.Module):
             
                 del distance_features, delta_pos_batch, distance 
 
-            attn_bias = torch.cat(attn_bias_blocks, dim=2)coalesce()
+            attn_bias = torch.cat(attn_bias_blocks, dim=2).coalesce()
             node_feature = self.node_proj(distance_features_sum)
             if nan_mask_graph.any():
                 attn_bias.masked_fill_(nan_mask_graph.unsqueeze(-1).unsqueeze(-1), 0.0)
