@@ -66,19 +66,13 @@ class PreprocessPositions(nn.Module):
                 distance_features = self.gaussian(distance)
             
                 distance_features_sum[slice_i] += distance_features.sum(dim=-2)
-                attn_bias_per_head = self.gaussian_proj(distance_features)
+                attn_bias_per_head = self.gaussian_proj(distance_features).permute(2, 0, 1)
 
                 attn_bias_blocks.append(attn_bias_per_head.to_sparse())
             
                 del distance_features, delta_pos_batch, distance 
 
-            attn_bias = torch.stack(attn_bias_blocks, dim=1).coalesce()
-            values = attn_bias.values().view(self.num_heads, n_node, n_node)
-            indices = torch.cat([torch.arange(self.num_heads)[:, None, None].expand(-1, n_node, n_node),
-                                 torch.arange(n_node)[None, :, None].expand(self.num_heads, -1, n_node),
-                                 torch.arange(n_node)[None, None, :].expand(self.num_heads, n_node, -1)], dim=0)
-            attn_bias = torch.sparse_coo_tensor(indices, values, (self.num_heads, n_node, n_node))
-
+            attn_bias = torch.stack(attn_bias_blocks, dim=1)
             node_feature = self.node_proj(distance_features_sum)
             if nan_mask_graph.any():
                 attn_bias.masked_fill_(nan_mask_graph.unsqueeze(-1).unsqueeze(-1), 0.0)
