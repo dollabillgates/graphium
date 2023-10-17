@@ -73,10 +73,13 @@ class PreprocessPositions(nn.Module):
             
                 del distance_features, delta_pos_batch, distance 
 
-            attn_bias = torch.stack(attn_bias_blocks, dim=2).coalesce()
-            sparse_dim = attn_bias.sparse_dim()
-            dense_dim = attn_bias.dense_dim()
-            attn_bias = attn_bias.sparse_resize_((self.num_heads, n_node, n_node), sparse_dim, dense_dim)
+            attn_bias = torch.stack(attn_bias_blocks, dim=1).coalesce()
+            values = attn_bias.values().view(self.num_heads, n_node, n_node)
+            indices = torch.cat([torch.arange(self.num_heads)[:, None, None].expand(-1, n_node, n_node),
+                                 torch.arange(n_node)[None, :, None].expand(self.num_heads, -1, n_node),
+                                 torch.arange(n_node)[None, None, :].expand(self.num_heads, n_node, -1)], dim=0)
+            attn_bias = torch.sparse_coo_tensor(indices, values, (self.num_heads, n_node, n_node))
+
             node_feature = self.node_proj(distance_features_sum)
             if nan_mask_graph.any():
                 attn_bias.masked_fill_(nan_mask_graph.unsqueeze(-1).unsqueeze(-1), 0.0)
@@ -87,7 +90,7 @@ class PreprocessPositions(nn.Module):
 
             del attn_bias, node_feature, nan_mask_graph, distance_features_sum, attn_bias_blocks
 
-        attn_bias = torch.cat(attn_bias_list, dim=0)
+        attn_bias = torch.stack(attn_bias_list, dim=0)
         node_feature = torch.cat(node_feature_list, dim=0)
         node_feature = to_sparse_batch(node_feature, idx)
 
