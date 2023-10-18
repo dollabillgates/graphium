@@ -31,65 +31,69 @@ class PreprocessPositions(nn.Module):
         self.node_proj = nn.Linear(self.num_kernel, self.embed_dim)
 
     def forward(self, batch: Batch, max_num_nodes_per_graph: int, on_ipu: bool, positions_3d_key: str) -> Tuple[Tensor, Tensor]:
-        pos = batch[positions_3d_key]
-        if self.first_normalization is not None:
-            pos = self.first_normalization(pos)
+    pos = batch[positions_3d_key]
+    if self.first_normalization is not None:
+        pos = self.first_normalization(pos)
 
-        batch_size = 1  # 1024
-        attn_bias_list = []
-        node_feature_list = []
+    batch_size = 1
+    attn_bias_list = []
+    node_feature_list = []
 
-        pos, mask, idx = to_dense_batch(
-            pos,
-            batch=batch.batch,
-            max_num_nodes_per_graph=max_num_nodes_per_graph,
-            drop_nodes_last_graph=on_ipu,
-        )
+    pos, mask, idx = to_dense_batch(
+        pos,
+        batch=batch.batch,
+        max_num_nodes_per_graph=max_num_nodes_per_graph,
+        drop_nodes_last_graph=on_ipu,
+    )
 
-        if torch.isnan(pos).any():
-            pos.masked_fill_(torch.isnan(pos)[:, 0, 0].unsqueeze(1).unsqueeze(2), 0.0)
+    if torch.isnan(pos).any():
+        pos.masked_fill_(torch.isnan(pos)[:, 0, 0].unsqueeze(1).unsqueeze(2), 0.0)
 
-        padding_mask = ~mask
+    padding_mask = ~mask
 
-        for graph in range(batch.num_graphs):
-            graph_pos = pos[graph]
-            nan_mask_graph = torch.isnan(graph_pos)[:, 0]
+    for graph in range(batch.num_graphs):
+        graph_pos = pos[graph]
+        nan_mask_graph = torch.isnan(graph_pos)[:, 0]
 
-            n_node = graph_pos.shape[0]
-            distance_features_sum = torch.zeros((n_node, self.num_kernel), device=pos.device, dtype=pos.dtype)
-            attn_bias_blocks = []
+        n_node = graph_pos.shape[0]
+        distance_features_sum = torch.zeros((n_node, self.num_kernel), device=pos.device, dtype=pos.dtype)
+        attn_bias_blocks = []
 
-            for i in range(0, n_node, batch_size):
-                slice_i = slice(i, min(i + batch_size, n_node))
-                delta_pos_batch = graph_pos[slice_i].unsqueeze(1) - graph_pos
-                distance = delta_pos_batch.norm(dim=-1)
-                distance_features = self.gaussian(distance)
+        for i in range(0, n_node, batch_size):
+            slice_i = slice(i, min(i + batch_size, n_node))
+            delta_pos_batch = graph_pos[slice_i].unsqueeze(1) - graph_pos
+            distance = delta_pos_batch.norm(dim=-1)
+            distance_features = self.gaussian(distance)
+        
+            distance_features_sum[slice_i] += distance_features.sum(dim=-2)
             
-                distance_features_sum[slice_i] += distance_features.sum(dim=-2)
-                attn_bias_per_head = self.gaussian_proj(distance_features).permute(2, 0, 1)
-
-                attn_bias_blocks.append(attn_bias_per_head.to_sparse())
+            attn_bias_per_head = self.gaussian_proj(distance_features).permute(2, 0, 1)
+            attn_bias_per_head = attn_bias_per_head.reshape(self.num_heads, -1, n_node)
+            attn_bias_per_head = attn_bias_per_head.to_sparse() if on_ipu else attn_bias_per_head
             
-                del distance_features, delta_pos_batch, distance 
+            attn_bias_blocks.append(attn_bias_per_head)
+            
+            del distance_features, delta_pos_batch, distance 
 
-            attn_bias = torch.cat(attn_bias_blocks, dim=0)
-            node_feature = self.node_proj(distance_features_sum)
-            if nan_mask_graph.any():
-                attn_bias.masked_fill_(nan_mask_graph.unsqueeze(-1).unsqueeze(-1), 0.0)
-                node_feature.masked_fill_(nan_mask_graph.unsqueeze(1), 0.0)
+        attn_bias = torch.stack(attn_bias_blocks, dim=0)
+        node_feature = self.node_proj(distance_features_sum)
+        
+        if nan_mask_graph.any():
+            attn_bias.masked_fill_(nan_mask_graph.unsqueeze(-1).unsqueeze(-1), 0.0)
+            node_feature.masked_fill_(nan_mask_graph.unsqueeze(1), 0.0)
 
-            attn_bias_list.append(attn_bias)
-            node_feature_list.append(node_feature)
+        attn_bias_list.append(attn_bias)
+        node_feature_list.append(node_feature)
 
-            del attn_bias, node_feature, nan_mask_graph, distance_features_sum, attn_bias_blocks
+        del attn_bias, node_feature, nan_mask_graph, distance_features_sum, attn_bias_blocks
 
-        attn_bias = torch.stack(attn_bias_list, dim=0)
-        node_feature = torch.cat(node_feature_list, dim=0)
-        node_feature = to_sparse_batch(node_feature, idx)
+    attn_bias = torch.cat(attn_bias_list, dim=0)
+    node_feature = torch.cat(node_feature_list, dim=0)
+    node_feature = to_sparse_batch(node_feature, idx)
 
-        del attn_bias_list, node_feature_list 
+    del attn_bias_list, node_feature_list 
 
-        return attn_bias, node_feature
+    return attn_bias, node_feature
 
 class GaussianLayer(nn.Module):
     def __init__(self, num_kernels=8, in_dim=3): # num_kernels = 128, 32
