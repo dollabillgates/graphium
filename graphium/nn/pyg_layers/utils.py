@@ -68,14 +68,14 @@ class PreprocessPositions(nn.Module):
                 distance_features_sum[slice_i] += distance_features.sum(dim=-2)
                 
                 attn_bias_per_head = self.gaussian_proj(distance_features).permute(2, 0, 1)
-                attn_bias_per_head = attn_bias_per_head.reshape(self.num_heads, -1, n_node)
+                attn_bias_per_head = attn_bias_per_head.reshape(self.num_heads, n_node, n_node)
                 attn_bias_per_head = attn_bias_per_head.to_sparse()
                 
                 attn_bias_blocks.append(attn_bias_per_head)
                 
                 del distance_features, delta_pos_batch, distance 
     
-            attn_bias = torch.cat(attn_bias_blocks, dim=0)
+            attn_bias = torch.cat(attn_bias_blocks, dim=1)
             node_feature = self.node_proj(distance_features_sum)
             
             if nan_mask_graph.any():
