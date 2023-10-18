@@ -75,7 +75,7 @@ class PreprocessPositions(nn.Module):
                 
                 del distance_features, delta_pos_batch, distance 
     
-            attn_bias = torch.stack(attn_bias_blocks, dim=0)
+            attn_bias = torch.cat(attn_bias_blocks, dim=0)
             node_feature = self.node_proj(distance_features_sum)
             
             if nan_mask_graph.any():
@@ -87,7 +87,7 @@ class PreprocessPositions(nn.Module):
     
             del attn_bias, node_feature, nan_mask_graph, distance_features_sum, attn_bias_blocks
     
-        attn_bias = torch.cat(attn_bias_list, dim=0)
+        attn_bias = torch.stack(attn_bias_list, dim=0)
         node_feature = torch.cat(node_feature_list, dim=0)
         node_feature = to_sparse_batch(node_feature, idx)
     
