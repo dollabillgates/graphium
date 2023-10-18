@@ -69,7 +69,7 @@ class PreprocessPositions(nn.Module):
             
             attn_bias_per_head = self.gaussian_proj(distance_features).permute(2, 0, 1)
             attn_bias_per_head = attn_bias_per_head.reshape(self.num_heads, -1, n_node)
-            attn_bias_per_head = attn_bias_per_head.to_sparse() if on_ipu else attn_bias_per_head
+            attn_bias_per_head = attn_bias_per_head.to_sparse()
             
             attn_bias_blocks.append(attn_bias_per_head)
             
