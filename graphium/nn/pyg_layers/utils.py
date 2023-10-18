@@ -103,7 +103,7 @@ class PreprocessPositions(nn.Module):
         return attn_bias, node_feature
 
 class GaussianLayer(nn.Module):
-    def __init__(self, num_kernels=6, in_dim=3): # num_kernels = 128, 32
+    def __init__(self, num_kernels=8, in_dim=3): # num_kernels = 128, 32
         super().__init__()
         self.num_kernels = num_kernels
         self.means = nn.Embedding(1, num_kernels)
