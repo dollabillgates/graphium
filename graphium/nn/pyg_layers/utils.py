@@ -36,6 +36,7 @@ class PreprocessPositions(nn.Module):
             pos = self.first_normalization(pos)
     
         batch_size = 1
+        concat_batch_size = 10
         attn_bias_list = []
         node_feature_list = []
     
@@ -73,13 +74,25 @@ class PreprocessPositions(nn.Module):
                 attn_bias_blocks.append(attn_bias_per_head)
                 
                 del distance_features, delta_pos_batch, distance 
+
+            indices_list = []
+            values_list = []
     
-                attn_bias_graph = torch.sparse_coo_tensor(
-                    torch.cat([b._indices() for b in attn_bias_blocks], dim=1), 
-                    torch.cat([b._values() for b in attn_bias_blocks]), 
-                    size=(self.num_heads, n_node, n_node)
-                )
-                attn_bias_list.append(attn_bias_graph)
+            for i in range(0, len(attn_bias_blocks), concat_batch_size):
+                indices_batch = torch.cat([b._indices() for b in attn_bias_blocks[i:i+concat_batch_size]], dim=1)
+                values_batch = torch.cat([b._values() for b in attn_bias_blocks[i:i+concat_batch_size]])
+                indices_list.append(indices_batch)
+                values_list.append(values_batch)
+        
+            indices_concat = torch.cat(indices_list, dim=1)
+            values_concat = torch.cat(values_list)
+        
+            attn_bias_graph = torch.sparse_coo_tensor(
+                indices_concat, 
+                values_concat, 
+                size=(self.num_heads, n_node, n_node)
+            )
+            attn_bias_list.append(attn_bias_graph)
             
             # Stack sparse tensors for all graphs in the batch
             attn_bias = torch.stack(attn_bias_list, dim=0)
