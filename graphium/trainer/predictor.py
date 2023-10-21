@@ -329,7 +329,9 @@ class PredictorModule(lightning.LightningModule):
                 normalize_val_test = task_specific_norm.normalize_val_test
             else:
                 normalize_val_test = False
+            print(f"normalize_val_test: {normalize_val_test}")
             if step_name != "train" and not normalize_val_test:
+                print(f"task_specific_norm: {task_specific_norm}") 
                 # apply denormalization for val and test predictions for correct loss and metrics evaluation
                 # if normalize_val_test is not true, only train loss will stay as the normalized version
                 # if normalize_val_test is true, no denormalization is applied, all losses and metrics are normalized version
