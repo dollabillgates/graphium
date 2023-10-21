@@ -312,6 +312,13 @@ class PredictorModule(lightning.LightningModule):
         # * check for nan in model output
         targets_dict = batch.get("labels")
 
+        # concatenate all GO labels into a single task graph_GO
+        go_tensors = [tensor for key, tensor in targets_dict.items() if key.startswith('GO')]
+        targets_dict['graph_GO'] = torch.cat(go_tensors, dim=0)
+        for key in list(targets_dict.keys()):
+            if key.startswith('GO'):
+                del targets_dict[key]
+
         # Different type of preds can be return by the forward
         if isinstance(preds, dict) and ("preds" in preds.keys()):
             preds = preds["preds"]
