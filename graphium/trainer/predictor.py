@@ -334,6 +334,8 @@ class PredictorModule(lightning.LightningModule):
                 # if normalize_val_test is not true, only train loss will stay as the normalized version
                 # if normalize_val_test is true, no denormalization is applied, all losses and metrics are normalized version
                 # preds[task] = task_specific_norm.denormalize(pred)
+            print("task:", task)
+            print("targets_dict:", targets_dict) 
             targets_dict[task] = targets_dict[task].to(dtype=pred.dtype)
         weights = batch.get("weights", None)
 
