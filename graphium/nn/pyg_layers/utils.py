@@ -101,8 +101,7 @@ class PreprocessPositions(nn.Module):
             if nan_mask_graph.any():
                 attn_bias.masked_fill_(nan_mask_graph.unsqueeze(-1).unsqueeze(-1), 0.0)
                 node_feature.masked_fill_(nan_mask_graph.unsqueeze(1), 0.0)
-    
-            attn_bias_list.append(attn_bias)
+
             node_feature_list.append(node_feature)
     
             del attn_bias, node_feature, nan_mask_graph, distance_features_sum, attn_bias_blocks
