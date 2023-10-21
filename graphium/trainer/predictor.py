@@ -325,17 +325,15 @@ class PredictorModule(lightning.LightningModule):
         # preds = {k: preds[ii] for ii, k in enumerate(targets_dict.keys())}
         for task, pred in preds.items():
             task_specific_norm = self.task_norms[task] if self.task_norms is not None else None
-            if hasattr(task_specific_norm, "normalize_val_test"):
-                normalize_val_test = task_specific_norm.normalize_val_test
-            else:
-                normalize_val_test = False
-            print(f"normalize_val_test: {normalize_val_test}")
-            if step_name != "train" and not normalize_val_test:
-                print(f"task_specific_norm: {task_specific_norm}") 
+            # if hasattr(task_specific_norm, "normalize_val_test"):
+            #    normalize_val_test = task_specific_norm.normalize_val_test
+            # else:
+                # normalize_val_test = False
+            # if step_name != "train" and not normalize_val_test:
                 # apply denormalization for val and test predictions for correct loss and metrics evaluation
                 # if normalize_val_test is not true, only train loss will stay as the normalized version
                 # if normalize_val_test is true, no denormalization is applied, all losses and metrics are normalized version
-                preds[task] = task_specific_norm.denormalize(pred)
+                # preds[task] = task_specific_norm.denormalize(pred)
             targets_dict[task] = targets_dict[task].to(dtype=pred.dtype)
         weights = batch.get("weights", None)
 
@@ -351,16 +349,16 @@ class PredictorModule(lightning.LightningModule):
         device = "cpu" if to_cpu else None
         for task in preds:
             task_specific_norm = self.task_norms[task] if self.task_norms is not None else None
-            if hasattr(task_specific_norm, "normalize_val_test"):
-                normalize_val_test = task_specific_norm.normalize_val_test
-            else:
-                normalize_val_test = False
-            if step_name == "train" and not normalize_val_test:
+            # if hasattr(task_specific_norm, "normalize_val_test"):
+            #    normalize_val_test = task_specific_norm.normalize_val_test
+            # else:
+            #    normalize_val_test = False
+            # if step_name == "train" and not normalize_val_test:
                 # apply denormalization for targets and predictions for the evaluation of training metrics (excluding loss)
                 # if normalize_val_test is not true, train loss will stay as the normalized version
                 # if normalize_val_test is true, no denormalization is applied, all losses and metrics are normalized version
-                preds[task] = task_specific_norm.denormalize(preds[task])
-                targets_dict[task] = task_specific_norm.denormalize(targets_dict[task])
+            #    preds[task] = task_specific_norm.denormalize(preds[task])
+            #    targets_dict[task] = task_specific_norm.denormalize(targets_dict[task])
             preds[task] = preds[task].detach().to(device=device)
             targets_dict[task] = targets_dict[task].detach().to(device=device)
         if weights is not None:
