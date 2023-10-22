@@ -557,8 +557,8 @@ class PredictorModule(lightning.LightningModule):
         preds = {}
         targets = {}
         for task in self.tasks:
-            preds[task] = torch.cat([out["preds"][task].to(device) for out in outputs], dim=0)
-            targets[task] = torch.cat([out["targets"][task].to(device) for out in outputs], dim=0)
+            preds[task] = torch.cat([out["preds"][task].to(device) for out in outputs], dim=0).squeeze()
+            targets[task] = torch.cat([out["targets"][task].to(device) for out in outputs], dim=0).squeeze()
         if ("weights" in outputs[0].keys()) and (outputs[0]["weights"] is not None):
             weights = torch.cat([out["weights"].to(device) for out in outputs], dim=0)
         else:
