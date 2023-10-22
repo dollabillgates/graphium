@@ -297,7 +297,7 @@ class PredictorModule(lightning.LightningModule):
         if weights is not None:
             raise NotImplementedError("Weights are no longer supported in the loss")
         all_task_losses = {
-            task: wrapped(preds=preds[task].squeeze(-1), target=targets[task])
+            task: wrapped(preds=preds[task].squeeze(), target=targets[task].squeeze())
             for task, wrapped in wrapped_loss_fun_dict.items()
         }
         total_loss = torch.sum(torch.stack(list(all_task_losses.values())), dim=0)
