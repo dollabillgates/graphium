@@ -296,6 +296,8 @@ class PredictorModule(lightning.LightningModule):
 
         if weights is not None:
             raise NotImplementedError("Weights are no longer supported in the loss")
+        print("Predictions:", preds)
+        print("Targets:", targets)
         all_task_losses = {
             task: wrapped(preds=preds[task], target=targets[task])
             for task, wrapped in wrapped_loss_fun_dict.items()
@@ -314,7 +316,7 @@ class PredictorModule(lightning.LightningModule):
 
         # concatenate all GO labels into a single task graph_GO
         go_tensors = [tensor for key, tensor in targets_dict.items() if key.startswith('GO')]
-        targets_dict['graph_GO'] = torch.cat(go_tensors, dim=0).unsqueeze(1)
+        targets_dict['graph_GO'] = torch.cat(go_tensors, dim=0)
         for key in list(targets_dict.keys()):
             if key.startswith('GO'):
                 del targets_dict[key]
